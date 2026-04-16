@@ -1,26 +1,48 @@
-# Open Tunnel
-
-**Access your terminal from any device, anywhere.**
-
-Open Tunnel is an open-source remote terminal tool that lets you share your local shell session over the web. Run one command on your machine, scan the QR code with your phone, and you have a full terminal in your browser — no subscriptions, no accounts, no VPN.
+<p align="center">
+  <h1 align="center">Open Tunnel</h1>
+  <p align="center">
+    <strong>Access your terminal from any device, anywhere.</strong>
+  </p>
+  <p align="center">
+    Open-source remote terminal over the web. No subscriptions. No accounts. No VPN.
+  </p>
+  <p align="center">
+    <a href="#quick-start">Quick Start</a> &middot;
+    <a href="#cloudflare-tunnel-recommended">Cloudflare Tunnel</a> &middot;
+    <a href="#deployment-options">Deploy</a> &middot;
+    <a href="#architecture">Architecture</a> &middot;
+    <a href="#security">Security</a>
+  </p>
+</p>
 
 ---
 
-## How It Works
+## What is Open Tunnel?
+
+Open Tunnel lets you share your local terminal session over the web. Run one command, scan the QR code with your phone, and you have a full shell in your mobile browser.
 
 ```
-Your Machine                    Cloud Relay                    Your Phone
-+-----------+     WebSocket     +------------+    WebSocket    +------------+
-|  agent.js | ───────────────>  |  relay.js  | <───────────── | Browser UI |
-|  (shell)  |                   | (Render)   |                | (xterm.js) |
-+-----------+                   +------------+                +------------+
+Your Machine              Relay (or Cloudflare Edge)              Your Phone
++---------------+         +------------------------+         +----------------+
+|               |   WSS   |                        |   WSS   |                |
+|   agent.js    |-------->|      relay.js           |<--------|   Browser UI   |
+|   (PTY shell) |         |   (WebSocket bridge)   |         |   (xterm.js)   |
+|               |<--------|                        |-------->|                |
++---------------+         +------------------------+         +----------------+
+     stdin/stdout              Token-authenticated              Mobile-optimized
+     via node-pty              session management               command input bar
 ```
 
-1. **Agent** runs on your local machine, spawns a shell, and connects to the relay
-2. **Relay** bridges connections between the agent and browser clients
-3. **Web UI** renders a terminal in your phone's browser with a mobile-friendly input bar
+### Features
 
-All communication is tunneled over WebSocket (WSS/TLS when deployed).
+- **One command to start** — `node agent.js wss://your-relay` and you're live
+- **QR code connection** — Scan from your phone, no URL typing
+- **Mobile-optimized UI** — Command input bar, shortcut buttons (Tab, Ctrl+C, arrows)
+- **Full PTY emulation** — Colors, cursor, tab completion, vim, tmux — everything works
+- **Auto-reconnect** — Both agent and client reconnect automatically on network drops
+- **Cloudflare Tunnel support** — Sub-50ms latency through nearest edge node
+- **Zero configuration** — No accounts, no API keys, no environment variables
+- **Self-hostable** — Run the relay anywhere, or skip it entirely with Cloudflare Tunnel
 
 ---
 
@@ -28,10 +50,9 @@ All communication is tunneled over WebSocket (WSS/TLS when deployed).
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or later
-- A free [Render](https://render.com) account (or any cloud host) for remote access
+- [Node.js](https://nodejs.org/) v18+
 
-### 1. Clone and Install
+### Install
 
 ```bash
 git clone https://github.com/RagavRida/open-tunnel.git
@@ -39,74 +60,99 @@ cd open-tunnel
 npm install
 ```
 
-### 2. Deploy the Relay
-
-Deploy `relay.js` to a cloud service so you can connect from anywhere.
-
-**Render (recommended, free tier):**
-
-1. Push the repo to GitHub
-2. Go to [render.com](https://render.com) > **New** > **Web Service**
-3. Connect your `open-tunnel` repo
-4. Set:
-   - **Build Command:** `npm install`
-   - **Start Command:** `node relay.js`
-   - **Instance Type:** Free
-5. Deploy — you'll get a URL like `https://open-tunnel.onrender.com`
-
-No environment variables needed.
-
-### 3. Start the Agent
+### Run
 
 ```bash
+# Terminal 1 — Start the relay
+node relay.js
+
+# Terminal 2 — Start the agent (local relay)
+node agent.js
+
+# Or connect to a remote relay
 node agent.js wss://your-relay-url.onrender.com
 ```
 
-You'll see:
-
-```
-  ========================================
-    Open Tunnel — Remote Terminal Active
-  ========================================
-
-  Scan this QR code with your phone:
-
-  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-  █ ▄▄▄▄▄ █ ▀▄▀█ ▄▄▄▄▄ █
-  █ █   █ █▀▄ ██ █   █ █
-  ...
-
-  Or open this URL:
-
-  https://open-tunnel.onrender.com?token=abc123...
-
-  Waiting for connections...
-```
-
-### 4. Connect from Your Phone
-
-- **Scan the QR code** with your phone camera, or
-- **Open the URL** in your phone's browser
-
-You'll get a full terminal with:
-- Command input bar at the bottom
-- Shortcut buttons: Tab, Ctrl+C, Ctrl+D, Up, Down, Esc, Clear
-- Real-time terminal output
+The agent prints a QR code and URL. Open it on your phone.
 
 ---
 
-## Local Development
+## Cloudflare Tunnel (Recommended)
 
-For testing on the same network (no cloud deploy needed):
+The fastest deployment method. Cloudflare routes traffic through its nearest edge node — **no cloud server needed**, no account required, ~50ms latency.
+
+### Install Cloudflare CLI (one-time)
 
 ```bash
-# Terminal 1: Start the relay
+brew install cloudflared          # macOS
+# or: sudo apt install cloudflared  # Linux
+```
+
+### Usage
+
+```bash
+# Terminal 1 — Start relay locally
 node relay.js
 
-# Terminal 2: Start the agent
-node agent.js
+# Terminal 2 — Expose via Cloudflare (instant public URL)
+cloudflared tunnel --url http://localhost:3100
+# Output: https://random-words.trycloudflare.com
 
-# Phone: Open http://<your-local-ip>:3100?token=<token>
+# Terminal 3 — Connect agent through the tunnel
+node agent.js wss://random-words.trycloudflare.com
+```
+
+Scan the QR code on your phone — done.
+
+### Latency Comparison
+
+| Method | Route | Latency |
+|---|---|---|
+| **Cloudflare Tunnel** | Phone → Edge (your city) → Mac | **~50ms** |
+| Render (free) | Phone → Oregon (US) → Mac → Oregon → Phone | ~800ms |
+| Fly.io (Singapore) | Phone → Singapore → Mac → Singapore → Phone | ~100ms |
+| Local WiFi | Phone → Router → Mac | ~5ms |
+
+> **Tip:** The Cloudflare URL changes on each restart. For a permanent URL, set up a [named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps) (free with Cloudflare account).
+
+---
+
+## Cloud Deployment
+
+For a persistent relay that's always available (no need to keep your Mac running Cloudflare).
+
+### Render (Free Tier)
+
+1. Push the repo to GitHub
+2. [render.com](https://render.com) → **New** → **Web Service**
+3. Connect your `open-tunnel` repo
+4. Configure:
+
+| Setting | Value |
+|---|---|
+| Build Command | `npm install` |
+| Start Command | `node relay.js` |
+| Instance Type | Free |
+
+5. Deploy → get URL like `https://open-tunnel.onrender.com`
+
+No environment variables needed.
+
+### Fly.io
+
+```bash
+cd open-tunnel
+fly launch --region sin    # Singapore (or maa for Mumbai)
+fly deploy
+```
+
+### Self-Hosted
+
+```bash
+# On any server with Node.js
+git clone https://github.com/RagavRida/open-tunnel.git
+cd open-tunnel && npm install
+PORT=443 node relay.js
 ```
 
 ---
@@ -115,121 +161,160 @@ node agent.js
 
 ```
 open-tunnel/
-├── relay.js          # WebSocket relay server + static file server
-├── agent.js          # Local agent — spawns PTY, connects to relay
+├── relay.js              # WebSocket relay + static file server (80 lines)
+├── agent.js              # Local PTY agent with auto-reconnect (100 lines)
 ├── public/
-│   └── index.html    # Mobile-friendly web terminal UI
-└── package.json
+│   └── index.html        # Mobile-optimized web terminal (200 lines)
+├── package.json
+└── README.md
 ```
 
-### Relay (`relay.js`)
+### Components
+
+#### Relay Server (`relay.js`)
+
+The relay is a lightweight WebSocket bridge that connects agents to browser clients.
+
+```
+                    ┌─────────────────────┐
+                    │     relay.js         │
+                    │                     │
+  Agent ──WSS──>    │  sessions: Map      │    <──WSS── Client (phone)
+                    │    token → {        │
+                    │      agent: ws,     │
+                    │      clients: Set   │
+                    │    }               │
+                    └─────────────────────┘
+```
 
 - Express serves the web UI from `public/`
-- WebSocket server manages sessions
-- Session map: `token -> { agent, clients }`
-- Handles explicit HTTP upgrade for cloud host compatibility
-- Health check endpoint at `/health`
+- WebSocket server with explicit HTTP upgrade (cloud-host compatible)
+- Ping/pong keepalive every 30s (prevents idle disconnects)
+- Session cleanup on agent disconnect
+- Health check at `/health`, session debug at `/status`
 
-### Agent (`agent.js`)
+#### Agent (`agent.js`)
 
-- Spawns a real PTY shell via `node-pty` (full color, cursor, tab completion)
-- Generates a cryptographically random 256-bit session token
-- Connects to relay as `type=agent`
-- Displays QR code and URL for easy phone connection
-- Forwards terminal I/O over WebSocket
+The agent runs on your local machine and bridges your shell to the relay.
 
-### Web UI (`public/index.html`)
+- Spawns a PTY via `node-pty` (full xterm-256color emulation)
+- Generates a 256-bit cryptographically random session token
+- Displays QR code for instant phone connection
+- Auto-reconnects with exponential backoff (1s → 30s, max 20 attempts)
+- Sends fresh prompt when a new client joins
 
-- [xterm.js](https://xtermjs.org/) terminal emulator with fit addon
-- Visible command input bar for reliable mobile keyboard input
-- Shortcut buttons for special keys (Tab, Ctrl+C, Ctrl+D, arrows)
-- Auto-connects when token is in URL
-- Responsive — works on phone and desktop browsers
+#### Web UI (`public/index.html`)
 
-### Message Protocol
+A mobile-first terminal interface designed for phone browsers.
 
-```
-Agent → Relay → Client:  { "type": "output", "data": "<terminal output>" }
-Client → Relay → Agent:  { "type": "input",  "data": "<keystrokes>" }
-Client → Relay → Agent:  { "type": "resize", "cols": 80, "rows": 24 }
-```
+- [xterm.js](https://xtermjs.org/) terminal with fit addon
+- **Command input bar** — visible text field for reliable mobile input
+- **Shortcut buttons** — Tab, Ctrl+C, Ctrl+D, Up, Down, Esc, Clear
+- Auto-connects when token is in URL query parameter
+- Auto-reconnects on WebSocket drop (2s retry)
+- Responsive layout — adapts to phone and desktop
+
+### Protocol
+
+All messages are JSON over WebSocket:
+
+| Direction | Type | Payload |
+|---|---|---|
+| Agent → Client | `output` | `{ "type": "output", "data": "<terminal bytes>" }` |
+| Client → Agent | `input` | `{ "type": "input", "data": "<keystrokes>" }` |
+| Client → Agent | `resize` | `{ "type": "resize", "cols": 80, "rows": 24 }` |
+| Relay → Agent | `client-joined` | `{ "type": "client-joined" }` |
 
 ---
 
 ## Security
 
-| Measure | Detail |
+### Threat Model
+
+Open Tunnel is designed for **personal use** — accessing your own machine from your own phone. It is not designed for multi-tenant or enterprise use without additional hardening.
+
+### Built-in Protections
+
+| Layer | Measure |
 |---|---|
-| **Session tokens** | 256-bit cryptographically random (32 hex bytes) |
-| **Transport encryption** | WSS (TLS) when deployed behind HTTPS |
-| **No persistence** | Sessions exist only in memory, cleaned up on disconnect |
-| **No authentication stored** | No passwords, no cookies, no accounts |
-| **Scoped access** | Each token grants access to one shell session only |
+| **Authentication** | 256-bit random token per session (32 hex bytes) |
+| **Transport** | WSS (TLS) when deployed behind HTTPS or Cloudflare |
+| **Session isolation** | Each token maps to exactly one shell session |
+| **No persistence** | Sessions exist only in memory, destroyed on disconnect |
+| **No stored credentials** | No passwords, cookies, databases, or user accounts |
+| **Keepalive** | Ping/pong prevents stale connections from lingering |
+| **Auto-cleanup** | All client connections close when agent disconnects |
 
-**Recommendations for production use:**
+### Recommendations
 
-- Restrict relay access with a reverse proxy or IP allowlist
-- Use HTTPS-only deployment (Render provides this by default)
-- Don't share session URLs on public channels
-- Stop the agent when you're done — the session terminates immediately
+- Use HTTPS/WSS in production (Render and Cloudflare provide this by default)
+- Never share session URLs publicly
+- Stop the agent when done — the session terminates immediately
+- For sensitive environments, add IP allowlisting at the relay or reverse proxy level
 
 ---
 
 ## Deployment Options
 
-| Platform | Free Tier | Setup |
-|---|---|---|
-| [Render](https://render.com) | Yes | Connect repo, deploy as Web Service |
-| [Fly.io](https://fly.io) | Yes | `fly launch` then `fly deploy` |
-| [Railway](https://railway.app) | Trial credits | Connect repo, auto-deploy |
-| Self-hosted | N/A | `node relay.js` on any server with Node.js |
-
-The relay is stateless and lightweight — it only forwards WebSocket messages.
+| Platform | Free | Latency | Account Needed | Best For |
+|---|---|---|---|---|
+| **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/)** | Yes | ~50ms | No | Daily use, lowest latency |
+| **Local WiFi** | Yes | ~5ms | No | Same-network access |
+| **[Render](https://render.com)** | Yes | ~800ms | Yes | Always-on relay (US) |
+| **[Fly.io](https://fly.io)** | Yes | ~100ms | Yes (card) | Always-on relay (pick region) |
+| **Self-hosted** | N/A | Varies | No | Full control |
 
 ---
 
 ## Tech Stack
 
-| Component | Technology |
-|---|---|
-| Relay server | Express + ws |
-| Terminal emulation | node-pty |
-| Web terminal | xterm.js + xterm-addon-fit |
-| QR code | qrcode-terminal |
-| Runtime | Node.js |
+| Component | Technology | Purpose |
+|---|---|---|
+| Relay server | Express + ws | HTTP server + WebSocket bridge |
+| Terminal emulation | node-pty | Full PTY with xterm-256color |
+| Web terminal | xterm.js + addon-fit | Browser-based terminal renderer |
+| QR code | qrcode-terminal | Terminal QR for phone scanning |
+| Tunnel | cloudflared (optional) | Public URL via Cloudflare edge |
+| Runtime | Node.js v18+ | Server and agent runtime |
 
 ---
 
 ## Troubleshooting
 
-**Agent shows "Connection error: Unexpected server response: 404"**
-- The relay hasn't finished deploying. Wait 1-2 minutes and retry.
+| Problem | Cause | Fix |
+|---|---|---|
+| `Connection error: 404` | Relay not deployed yet | Wait 1-2 min for deploy to finish |
+| `No active session found` | Agent not running | Start the agent: `node agent.js wss://...` |
+| Connected but no prompt | Agent crashed or restarting | Check agent terminal, restart if needed |
+| Typing but nothing appears | Mobile keyboard not connected to terminal | Use the command input bar at the bottom |
+| QR code won't scan | Terminal too small | Enlarge terminal window, or copy the URL |
+| Agent keeps disconnecting | Idle timeout or relay restarting | Agent auto-reconnects; wait a few seconds |
+| High latency | Relay in distant region | Switch to Cloudflare Tunnel |
 
-**Phone shows "No active session found"**
-- The agent isn't running. Start it with `node agent.js wss://your-relay-url`.
+---
 
-**Terminal connects but no prompt appears**
-- The agent may have crashed. Check the agent terminal for errors and restart.
+## Roadmap
 
-**Keyboard types but nothing shows on screen**
-- Use the command input bar at the bottom of the screen instead of tapping the terminal directly.
-
-**QR code doesn't scan**
-- Make the terminal window larger, or copy the URL printed below the QR code.
+- [ ] Optional password protection for sessions
+- [ ] Multiple concurrent sessions per agent
+- [ ] File transfer between devices (upload/download)
+- [ ] End-to-end encryption (beyond TLS)
+- [ ] Clipboard sync between terminal and phone
+- [ ] Native mobile app (React Native)
+- [ ] One-line install script (`npx open-tunnel`)
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Areas that could use help:
+Contributions welcome. See the [roadmap](#roadmap) for ideas, or open an issue.
 
-- [ ] Authentication (optional password protection for sessions)
-- [ ] Multiple concurrent sessions
-- [ ] Session reconnection on network drop
-- [ ] File upload/download between devices
-- [ ] End-to-end encryption (beyond TLS)
-- [ ] Desktop Electron app
-- [ ] Native mobile app (React Native)
+```bash
+git clone https://github.com/RagavRida/open-tunnel.git
+cd open-tunnel
+npm install
+node relay.js     # Start hacking
+```
 
 ---
 
@@ -239,4 +324,6 @@ MIT
 
 ---
 
-Built with the belief that accessing your own terminal shouldn't require a subscription.
+<p align="center">
+  Built with the belief that accessing your own terminal shouldn't require a subscription.
+</p>
