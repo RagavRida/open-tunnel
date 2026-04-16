@@ -78,8 +78,6 @@
     #connect-btn:active { background: #c73650; }
     #error-msg { color: #fca5a5; margin-top: 12px; font-size: 13px; display: none; }
     .xterm { height: 100%; }
-
-    /* Mobile command input bar */
     #input-bar {
       display: none;
       flex-shrink: 0;
@@ -170,6 +168,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script>
     let ws, term, fitAddon;
+    let currentToken = '';
+    let termInitialized = false;
+    let reconnectTimer = null;
 
     const urlToken = new URLSearchParams(window.location.search).get('token');
     if (urlToken) {
@@ -205,7 +206,6 @@
       input.focus();
     }
 
-    // Enter key in command input sends the command
     document.getElementById('cmd-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -213,67 +213,73 @@
       }
     });
 
-    function connect() {
-      const token = document.getElementById('token-input').value.trim();
-      if (!token) { showError('Please enter a token'); return; }
+    function initTerminal() {
+      if (termInitialized) return;
+      termInitialized = true;
 
-      setStatus('connecting', 'Connecting...');
-      document.getElementById('error-msg').style.display = 'none';
+      document.getElementById('connect-screen').style.display = 'none';
+      document.getElementById('terminal-container').style.display = 'block';
+      document.getElementById('input-bar').style.display = 'block';
 
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 12,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: '#1a1a2e',
+          foreground: '#e0e0e0',
+          cursor: '#e94560',
+          selectionBackground: '#0f3460',
+        },
+        scrollback: 1000,
+      });
+
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById('terminal-container'));
+      fitAddon.fit();
+
+      term.onData((data) => {
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      const handleResize = () => {
+        if (fitAddon && term) {
+          fitAddon.fit();
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          }
+        }
+      };
+      window.addEventListener('resize', handleResize);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', handleResize);
+      }
+    }
+
+    function reconnect() {
+      if (reconnectTimer) return;
+      setStatus('connecting', 'Reconnecting...');
+      if (term) term.write('\r\n\x1b[33m--- Reconnecting... ---\x1b[0m\r\n');
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWs();
+      }, 2000);
+    }
+
+    function connectWs() {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${location.host}?type=client&token=${token}`;
+      const wsUrl = `${proto}//${location.host}?type=client&token=${currentToken}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setStatus('connected', 'Connected');
-        document.getElementById('connect-screen').style.display = 'none';
-        document.getElementById('terminal-container').style.display = 'block';
-        document.getElementById('input-bar').style.display = 'block';
-
-        term = new Terminal({
-          cursorBlink: true,
-          fontSize: 12,
-          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-          theme: {
-            background: '#1a1a2e',
-            foreground: '#e0e0e0',
-            cursor: '#e94560',
-            selectionBackground: '#0f3460',
-          },
-          scrollback: 1000,
-          disableStdin: false,
-        });
-
-        fitAddon = new FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(document.getElementById('terminal-container'));
-        fitAddon.fit();
-
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-
-        // Desktop keyboard input still works via xterm
-        term.onData((data) => {
-          if (ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'input', data }));
-          }
-        });
-
-        // Resize handling
-        const handleResize = () => {
-          if (fitAddon && term) {
-            fitAddon.fit();
-            if (ws && ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-            }
-          }
-        };
-        window.addEventListener('resize', handleResize);
-        if (window.visualViewport) {
-          window.visualViewport.addEventListener('resize', handleResize);
+        if (term) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
-
-        // Focus command input on mobile
-        setTimeout(() => document.getElementById('cmd-input').focus(), 500);
+        setTimeout(() => document.getElementById('cmd-input').focus(), 300);
       };
 
       ws.onmessage = (event) => {
@@ -288,21 +294,37 @@
       };
 
       ws.onclose = (event) => {
-        setStatus('disconnected', 'Disconnected');
-        document.getElementById('input-bar').style.display = 'none';
         if (event.code === 4001) {
-          showError('No active session found for this token. Is the agent running?');
-          document.getElementById('connect-screen').style.display = 'flex';
-          document.getElementById('terminal-container').style.display = 'none';
+          // Agent not running — don't reconnect
+          setStatus('disconnected', 'Disconnected');
+          if (term) term.write('\r\n\x1b[31m--- No agent found. Is it running? ---\x1b[0m\r\n');
         } else if (event.code === 4002) {
+          // Agent disconnected
+          setStatus('disconnected', 'Disconnected');
           if (term) term.write('\r\n\x1b[31m--- Agent disconnected ---\x1b[0m\r\n');
+          // Agent might reconnect, so we should too
+          reconnect();
+        } else {
+          // Unexpected close — auto-reconnect
+          reconnect();
         }
       };
 
       ws.onerror = () => {
-        setStatus('disconnected', 'Disconnected');
-        showError('Connection failed. Check that the relay server is running.');
+        // Will trigger onclose, which handles reconnect
       };
+    }
+
+    function connect() {
+      const token = document.getElementById('token-input').value.trim();
+      if (!token) { showError('Please enter a token'); return; }
+
+      currentToken = token;
+      document.getElementById('error-msg').style.display = 'none';
+      setStatus('connecting', 'Connecting...');
+
+      initTerminal();
+      connectWs();
     }
   </script>
 </body>
