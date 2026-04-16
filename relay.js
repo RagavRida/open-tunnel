@@ -18,6 +18,19 @@ server.on('upgrade', (request, socket, head) => {
 // Health check for Render
 app.get('/health', (req, res) => res.send('ok'));
 
+// Debug: show active sessions count
+app.get('/status', (req, res) => {
+  const info = [];
+  for (const [token, session] of sessions) {
+    info.push({
+      token: token.slice(0, 8) + '...',
+      agentConnected: session.agent?.readyState === 1,
+      clients: session.clients.size,
+    });
+  }
+  res.json({ sessions: info.length, details: info });
+});
+
 // Serve web terminal UI
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -42,9 +55,10 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (data) => {
       const session = sessions.get(token);
       if (!session) return;
-      // Forward agent output to all browser clients
+      // Forward agent output to all browser clients (ensure string)
+      const msg = typeof data === 'string' ? data : data.toString('utf8');
       for (const client of session.clients) {
-        if (client.readyState === 1) client.send(data);
+        if (client.readyState === 1) client.send(msg);
       }
     });
 
@@ -69,11 +83,17 @@ wss.on('connection', (ws, req) => {
     console.log(`[+] Client joined (token: ${token.slice(0, 8)}..., clients: ${session.clients.size})`);
 
     ws.on('message', (data) => {
-      // Forward client input to agent
+      // Forward client input to agent (ensure string)
+      const msg = typeof data === 'string' ? data : data.toString('utf8');
       if (session.agent.readyState === 1) {
-        session.agent.send(data);
+        session.agent.send(msg);
       }
     });
+
+    // Notify agent a client joined so it can send fresh prompt
+    if (session.agent.readyState === 1) {
+      session.agent.send(JSON.stringify({ type: 'client-joined' }));
+    }
 
     ws.on('close', () => {
       session.clients.delete(ws);

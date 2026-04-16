@@ -43,6 +43,10 @@ ws.on('message', (data) => {
       ptyProcess.write(msg.data);
     } else if (msg.type === 'resize') {
       ptyProcess.resize(msg.cols, msg.rows);
+    } else if (msg.type === 'client-joined') {
+      // Send a newline to trigger fresh prompt for new client
+      console.log('  [+] Client connected to your session');
+      ptyProcess.write('\n');
     }
   } catch (e) {
     // Raw data fallback
