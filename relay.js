@@ -6,7 +6,17 @@ const url = require('url');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
+
+// Handle WebSocket upgrade explicitly (needed for Render/cloud hosts)
+server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request);
+  });
+});
+
+// Health check for Render
+app.get('/health', (req, res) => res.send('ok'));
 
 // Serve web terminal UI
 app.use(express.static(path.join(__dirname, 'public')));
@@ -76,7 +86,7 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3100;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Open Tunnel relay running on port ${PORT}`);
   console.log(`  Web UI: http://localhost:${PORT}\n`);
 });
