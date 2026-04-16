@@ -78,31 +78,59 @@
     #connect-btn:active { background: #c73650; }
     #error-msg { color: #fca5a5; margin-top: 12px; font-size: 13px; display: none; }
     .xterm { height: 100%; }
-    /* Make xterm's hidden textarea visible enough for mobile to focus */
-    .xterm-helper-textarea {
-      opacity: 0 !important;
-      position: absolute !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      z-index: 10 !important;
-    }
-    #keyboard-btn {
+
+    /* Mobile command input bar */
+    #input-bar {
       display: none;
-      position: fixed;
-      bottom: 12px;
-      right: 12px;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
+      flex-shrink: 0;
+      padding: 6px 8px;
+      background: #16213e;
+      border-top: 1px solid #0f3460;
+    }
+    #input-bar .row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    #cmd-input {
+      flex: 1;
+      padding: 10px 12px;
+      font-size: 16px;
+      background: #1a1a2e;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-family: Menlo, Monaco, monospace;
+      outline: none;
+    }
+    #cmd-input:focus { border-color: #e94560; }
+    #send-btn {
+      padding: 10px 16px;
       background: #e94560;
       color: white;
       border: none;
-      font-size: 24px;
-      z-index: 100;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
     }
+    #send-btn:active { background: #c73650; }
+    .shortcut-row {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+      overflow-x: auto;
+    }
+    .shortcut-btn {
+      padding: 6px 10px;
+      background: #0f3460;
+      color: #e0e0e0;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      white-space: nowrap;
+    }
+    .shortcut-btn:active { background: #e94560; }
   </style>
 </head>
 <body>
@@ -120,13 +148,28 @@
   </div>
 
   <div id="terminal-container" style="display:none"></div>
-  <button id="keyboard-btn" onclick="openKeyboard()">&#9000;</button>
+
+  <div id="input-bar">
+    <div class="row">
+      <input id="cmd-input" type="text" placeholder="Type command..."
+        autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button id="send-btn" onclick="sendCommand()">Run</button>
+    </div>
+    <div class="shortcut-row">
+      <button class="shortcut-btn" onclick="sendKey('\t')">Tab</button>
+      <button class="shortcut-btn" onclick="sendKey('\x03')">Ctrl+C</button>
+      <button class="shortcut-btn" onclick="sendKey('\x04')">Ctrl+D</button>
+      <button class="shortcut-btn" onclick="sendKey('\x1b[A')">Up</button>
+      <button class="shortcut-btn" onclick="sendKey('\x1b[B')">Down</button>
+      <button class="shortcut-btn" onclick="sendKey('\x1b')">Esc</button>
+      <button class="shortcut-btn" onclick="sendKey('\x0c')">Clear</button>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script>
     let ws, term, fitAddon;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
     const urlToken = new URLSearchParams(window.location.search).get('token');
     if (urlToken) {
@@ -146,18 +189,29 @@
       el.style.display = 'block';
     }
 
-    function openKeyboard() {
-      if (term) {
-        // Focus xterm's internal textarea
-        const ta = document.querySelector('.xterm-helper-textarea');
-        if (ta) {
-          ta.setAttribute('inputmode', 'text');
-          ta.setAttribute('enterkeyhint', 'send');
-          ta.focus({ preventScroll: true });
-        }
-        term.focus();
+    function sendKey(key) {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'input', data: key }));
       }
     }
+
+    function sendCommand() {
+      const input = document.getElementById('cmd-input');
+      const cmd = input.value;
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+      }
+      input.value = '';
+      input.focus();
+    }
+
+    // Enter key in command input sends the command
+    document.getElementById('cmd-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendCommand();
+      }
+    });
 
     function connect() {
       const token = document.getElementById('token-input').value.trim();
@@ -174,14 +228,11 @@
         setStatus('connected', 'Connected');
         document.getElementById('connect-screen').style.display = 'none';
         document.getElementById('terminal-container').style.display = 'block';
-
-        if (isMobile) {
-          document.getElementById('keyboard-btn').style.display = 'block';
-        }
+        document.getElementById('input-bar').style.display = 'block';
 
         term = new Terminal({
           cursorBlink: true,
-          fontSize: isMobile ? 12 : 14,
+          fontSize: 12,
           fontFamily: 'Menlo, Monaco, "Courier New", monospace',
           theme: {
             background: '#1a1a2e',
@@ -189,8 +240,8 @@
             cursor: '#e94560',
             selectionBackground: '#0f3460',
           },
-          allowProposedApi: true,
           scrollback: 1000,
+          disableStdin: false,
         });
 
         fitAddon = new FitAddon.FitAddon();
@@ -200,17 +251,11 @@
 
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
 
-        // All keyboard input (desktop + mobile) goes through xterm's onData
+        // Desktop keyboard input still works via xterm
         term.onData((data) => {
           if (ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'input', data }));
           }
-        });
-
-        // Tap terminal to focus on mobile
-        document.getElementById('terminal-container').addEventListener('touchstart', (e) => {
-          e.preventDefault();
-          openKeyboard();
         });
 
         // Resize handling
@@ -227,12 +272,8 @@
           window.visualViewport.addEventListener('resize', handleResize);
         }
 
-        // Auto-focus on mobile after a delay
-        if (isMobile) {
-          setTimeout(openKeyboard, 600);
-        } else {
-          term.focus();
-        }
+        // Focus command input on mobile
+        setTimeout(() => document.getElementById('cmd-input').focus(), 500);
       };
 
       ws.onmessage = (event) => {
@@ -248,7 +289,7 @@
 
       ws.onclose = (event) => {
         setStatus('disconnected', 'Disconnected');
-        document.getElementById('keyboard-btn').style.display = 'none';
+        document.getElementById('input-bar').style.display = 'none';
         if (event.code === 4001) {
           showError('No active session found for this token. Is the agent running?');
           document.getElementById('connect-screen').style.display = 'flex';
