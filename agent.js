@@ -22,12 +22,12 @@ const ws = new WebSocket(`${RELAY}?type=agent&token=${token}`);
 
 ws.on('open', () => {
   const httpUrl = RELAY.replace('ws://', 'http://').replace('wss://', 'https://');
+  const fullUrl = `${httpUrl}?token=${token}`;
   console.log('\n  ========================================');
   console.log('    Open Tunnel — Remote Terminal Active');
   console.log('  ========================================\n');
-  console.log(`  Open on your phone:`);
-  console.log(`  ${httpUrl}?token=${token}\n`);
-  console.log(`  Token: ${token}\n`);
+  console.log(`  Open this URL on your phone:\n`);
+  console.log(`  ${fullUrl}\n`);
   console.log('  Waiting for connections...\n');
 });
 

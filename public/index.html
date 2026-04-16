@@ -7,11 +7,11 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
     body {
       background: #1a1a2e;
       color: #e0e0e0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      height: 100vh;
       display: flex;
       flex-direction: column;
     }
@@ -22,6 +22,7 @@
       align-items: center;
       justify-content: space-between;
       border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
     }
     #header h1 { font-size: 14px; font-weight: 600; color: #e94560; }
     #status {
@@ -77,6 +78,27 @@
     #connect-btn:active { background: #c73650; }
     #error-msg { color: #fca5a5; margin-top: 12px; font-size: 13px; display: none; }
     .xterm { height: 100%; }
+
+    /* Mobile input helper */
+    #mobile-input {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      opacity: 0;
+      height: 1px;
+      z-index: -1;
+    }
+    #tap-hint {
+      display: none;
+      text-align: center;
+      padding: 8px;
+      background: #16213e;
+      color: #fcd34d;
+      font-size: 12px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -94,17 +116,23 @@
   </div>
 
   <div id="terminal-container" style="display:none"></div>
+  <div id="tap-hint">Tap here to open keyboard</div>
+
+  <!-- Hidden input to capture mobile keyboard -->
+  <textarea id="mobile-input" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script>
     let ws, term, fitAddon;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const mobileInput = document.getElementById('mobile-input');
+    const tapHint = document.getElementById('tap-hint');
 
     // Auto-fill token from URL
     const urlToken = new URLSearchParams(window.location.search).get('token');
     if (urlToken) {
       document.getElementById('token-input').value = urlToken;
-      // Auto-connect if token in URL
       window.addEventListener('load', () => setTimeout(connect, 300));
     }
 
@@ -120,6 +148,13 @@
       el.style.display = 'block';
     }
 
+    function focusMobileInput() {
+      if (isMobile) {
+        mobileInput.focus();
+        tapHint.textContent = 'Keyboard active — tap here if keyboard closes';
+      }
+    }
+
     function connect() {
       const token = document.getElementById('token-input').value.trim();
       if (!token) { showError('Please enter a token'); return; }
@@ -127,7 +162,6 @@
       setStatus('connecting', 'Connecting...');
       document.getElementById('error-msg').style.display = 'none';
 
-      // Determine WebSocket URL
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${location.host}?type=client&token=${token}`;
 
@@ -138,10 +172,13 @@
         document.getElementById('connect-screen').style.display = 'none';
         document.getElementById('terminal-container').style.display = 'block';
 
-        // Initialize xterm.js
+        if (isMobile) {
+          tapHint.style.display = 'block';
+        }
+
         term = new Terminal({
           cursorBlink: true,
-          fontSize: 14,
+          fontSize: isMobile ? 13 : 14,
           fontFamily: 'Menlo, Monaco, "Courier New", monospace',
           theme: {
             background: '#1a1a2e',
@@ -150,6 +187,7 @@
             selectionBackground: '#0f3460',
           },
           allowProposedApi: true,
+          scrollback: 1000,
         });
 
         fitAddon = new FitAddon.FitAddon();
@@ -160,22 +198,63 @@
         // Send terminal size to agent
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
 
-        // Keyboard input → agent
+        // Desktop: xterm handles keyboard natively
         term.onData((data) => {
           if (ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'input', data }));
           }
         });
 
-        // Handle window resize
-        window.addEventListener('resize', () => {
+        // Mobile: capture input from hidden textarea
+        if (isMobile) {
+          mobileInput.addEventListener('input', (e) => {
+            const val = mobileInput.value;
+            if (val && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'input', data: val }));
+            }
+            mobileInput.value = '';
+          });
+
+          // Handle Enter key on mobile
+          mobileInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+              }
+              mobileInput.value = '';
+            } else if (e.key === 'Backspace') {
+              e.preventDefault();
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'input', data: '\x7f' }));
+              }
+            } else if (e.key === 'Tab') {
+              e.preventDefault();
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'input', data: '\t' }));
+              }
+            }
+          });
+
+          // Tap terminal or hint to focus keyboard
+          document.getElementById('terminal-container').addEventListener('click', focusMobileInput);
+          tapHint.addEventListener('click', focusMobileInput);
+
+          // Auto-focus after short delay
+          setTimeout(focusMobileInput, 500);
+        }
+
+        // Handle window/keyboard resize
+        const handleResize = () => {
           if (fitAddon && term) {
             fitAddon.fit();
             if (ws.readyState === 1) {
               ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
             }
           }
-        });
+        };
+        window.addEventListener('resize', handleResize);
+        window.visualViewport && window.visualViewport.addEventListener('resize', handleResize);
       };
 
       ws.onmessage = (event) => {
@@ -195,6 +274,7 @@
           showError('No active session found for this token. Is the agent running?');
           document.getElementById('connect-screen').style.display = 'flex';
           document.getElementById('terminal-container').style.display = 'none';
+          tapHint.style.display = 'none';
         } else if (event.code === 4002) {
           if (term) term.write('\r\n\x1b[31m--- Agent disconnected ---\x1b[0m\r\n');
         }
