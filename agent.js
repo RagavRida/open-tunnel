@@ -3,6 +3,7 @@ const WebSocket = require('ws');
 const pty = require('node-pty');
 const crypto = require('crypto');
 const os = require('os');
+const qrcode = require('qrcode-terminal');
 
 const RELAY = process.argv[2] || 'ws://localhost:3100';
 const token = crypto.randomBytes(16).toString('hex');
@@ -26,9 +27,13 @@ ws.on('open', () => {
   console.log('\n  ========================================');
   console.log('    Open Tunnel — Remote Terminal Active');
   console.log('  ========================================\n');
-  console.log(`  Open this URL on your phone:\n`);
-  console.log(`  ${fullUrl}\n`);
-  console.log('  Waiting for connections...\n');
+  console.log('  Scan this QR code with your phone:\n');
+  qrcode.generate(fullUrl, { small: true }, (qr) => {
+    console.log(qr);
+    console.log(`  Or open this URL:\n`);
+    console.log(`  ${fullUrl}\n`);
+    console.log('  Waiting for connections...\n');
+  });
 });
 
 ws.on('message', (data) => {
