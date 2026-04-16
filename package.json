@@ -1,0 +1,15 @@
+{
+  "name": "open-tunnel",
+  "version": "1.0.0",
+  "description": "Open-source remote terminal — access your shell from any device",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js",
+    "agent": "node agent.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}

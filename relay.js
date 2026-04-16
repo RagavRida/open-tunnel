@@ -1,0 +1,82 @@
+const express = require('express');
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const path = require('path');
+const url = require('url');
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Serve web terminal UI
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Sessions: token -> { agent: WebSocket, clients: Set<WebSocket> }
+const sessions = new Map();
+
+wss.on('connection', (ws, req) => {
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const type = params.get('type');
+  const token = params.get('token');
+
+  if (!type || !token) {
+    ws.close(4000, 'Missing type or token');
+    return;
+  }
+
+  if (type === 'agent') {
+    // Local agent connecting — create session
+    sessions.set(token, { agent: ws, clients: new Set() });
+    console.log(`[+] Agent connected (token: ${token.slice(0, 8)}...)`);
+
+    ws.on('message', (data) => {
+      const session = sessions.get(token);
+      if (!session) return;
+      // Forward agent output to all browser clients
+      for (const client of session.clients) {
+        if (client.readyState === 1) client.send(data);
+      }
+    });
+
+    ws.on('close', () => {
+      const session = sessions.get(token);
+      if (session) {
+        for (const client of session.clients) client.close(4002, 'Agent disconnected');
+        sessions.delete(token);
+      }
+      console.log(`[-] Agent disconnected (token: ${token.slice(0, 8)}...)`);
+    });
+
+  } else if (type === 'client') {
+    // Browser client connecting — join existing session
+    const session = sessions.get(token);
+    if (!session || !session.agent || session.agent.readyState !== 1) {
+      ws.close(4001, 'No active agent for this token');
+      return;
+    }
+
+    session.clients.add(ws);
+    console.log(`[+] Client joined (token: ${token.slice(0, 8)}..., clients: ${session.clients.size})`);
+
+    ws.on('message', (data) => {
+      // Forward client input to agent
+      if (session.agent.readyState === 1) {
+        session.agent.send(data);
+      }
+    });
+
+    ws.on('close', () => {
+      session.clients.delete(ws);
+      console.log(`[-] Client left (token: ${token.slice(0, 8)}..., clients: ${session.clients.size})`);
+    });
+
+  } else {
+    ws.close(4000, 'Invalid type — use "agent" or "client"');
+  }
+});
+
+const PORT = process.env.PORT || 3100;
+server.listen(PORT, () => {
+  console.log(`\n  Open Tunnel relay running on port ${PORT}`);
+  console.log(`  Web UI: http://localhost:${PORT}\n`);
+});
