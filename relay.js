@@ -105,6 +105,20 @@ wss.on('connection', (ws, req) => {
   }
 });
 
+// Ping all connections every 30s to keep alive (Render drops idle connections)
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+});
+
 const PORT = process.env.PORT || 3100;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Open Tunnel relay running on port ${PORT}`);
